@@ -1,23 +1,30 @@
 {% extends "base.html" %}
 
-{% block title %}Welcome to RPY{% endblock %}
-
 {% block content %}
 
 <div class="row">
     <div class="span4">
         <form onsubmit="return false;">
-            <p><label>Input</label>
+            <h3>Input</h3>
+            <p>
             <textarea id="rinput" rows="5" cols="80"></textarea></p>
             <p><button id="rsubmit" class="btn">Eval</button></p>
         </form>
 
+        <h3>R output</h3>
         <div id="rhistory">
         </div>
     </div>
 
     <div class="span4">
+        <h3>Workspace content</h3>
         <div id="workspace">
+        </div>
+    </div>
+
+    <div class="span4">
+        <h3>Plots</h3>
+        <div id="plots">
         </div>
     </div>
 
@@ -42,6 +49,9 @@ $(document).ready(function() {
             case 'evalresult':
                 append_history(msg.data);
                 break;
+            case 'plot':
+                show_plot(msg.data);
+                break;
         }
 
     };
@@ -59,6 +69,10 @@ $(document).ready(function() {
 
 function nl2br(str) {
     return str.replace("\n", "<br />", "g");
+}
+
+function show_plot(plot_path) {
+    $('#plots').append($('<img />').attr('src', plot_path));
 }
 
 function append_history(what) {

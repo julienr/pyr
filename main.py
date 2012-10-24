@@ -5,16 +5,47 @@ import tornado.escape as escape
 import tornado.websocket as websocket
 from tornado.web import URLSpec, asynchronous
 import os
+import os.path
 import sys
 import StringIO
 import jinja2
 import mimetypes
 import rpy2.robjects as robjects
 import json
+import watchdog.observers
+import watchdog.events
+import tempfile
+
+sockets = []
 
 # Fake r initialization
 robjects.globalenv['A'] = robjects.r.matrix(robjects.IntVector(range(10)), nrow=5)
 robjects.globalenv['B'] = robjects.r.matrix(robjects.IntVector(range(10,0,-1)), nrow=5)
+
+plotdir = os.path.abspath('tmp/rplots/')
+#plotdir = tempfile.mkdtemp()
+
+print 'plotdir : ', plotdir
+# R plot setup
+def set_plot2png():
+    #robjects.r('pdf(file="tmp/rplots/plot%03d.pdf", onefile=FALSE)')
+    #robjects.r('png(filename="%s/plot%%03d.png")'%plotdir)
+    _, fname = tempfile.mkstemp(suffix='.png', dir=plotdir)
+    robjects.r('png(filename="%s")'%fname)
+set_plot2png()
+
+class NewPlotHandler(watchdog.events.FileSystemEventHandler):
+    def on_created(self, event):
+        if event.src_path.endswith('.png'):
+            print 'new plot : ', event.src_path
+            for s in sockets:
+                s.send_new_plot(os.path.basename(event.src_path))
+
+newplot_handler = NewPlotHandler()
+observer = watchdog.observers.Observer()
+observer.schedule(newplot_handler, plotdir, recursive=False)
+observer.start()
+
 
 # Jinja setup
 jinja_env = jinja2.Environment(loader=jinja2.PackageLoader('pyr',
@@ -47,12 +78,6 @@ class RPYRequestHandler(tornado.web.RequestHandler):
         self.write(escape.json_encode(data))
         self.finish()
 
-    def send_plot(self, fig):
-        imgdata = StringIO.StringIO()
-        fig.savefig(imgdata, format='png')
-        imgdata.seek(0)
-        self.send_file(imgdata.read(), 'image/png')
-
 def list_workspace():
     matrices = {}
     strobjs = {}
@@ -75,6 +100,7 @@ def list_workspace():
 class RSocket(websocket.WebSocketHandler):
     def open(self):
         print 'WebSocket opened'
+        sockets.append(self)
 
     def send_refresh_workspace(self):
         wsdict = list_workspace()
@@ -85,6 +111,10 @@ class RSocket(websocket.WebSocketHandler):
         self.write_message(escape.json_encode(response))
 
     def send_reval_result(self, command):
+        # TODO: This is ugly, but the only way to ensure we continue plotting
+        # to files if the user calls dev.off()
+        set_plot2png()
+
         try:
             result = str(robjects.r(command))
         except Exception as e:
@@ -93,6 +123,13 @@ class RSocket(websocket.WebSocketHandler):
         response = {
             'type': 'evalresult',
             'data':result
+        }
+        self.write_message(escape.json_encode(response))
+
+    def send_new_plot(self, plot_path):
+        response = {
+            'type': 'plot',
+            'data' : url_for('rplot', plot_path)
         }
         self.write_message(escape.json_encode(response))
 
@@ -108,40 +145,30 @@ class RSocket(websocket.WebSocketHandler):
 
     def on_close(self):
         print 'WebSocket closed'
+        sockets.remove(self)
 
 # Standard handlers
 class ListRWorkspace(RPYRequestHandler):
     def get(self):
         self.send_json(list_workspace())
 
+class RPlot(RPYRequestHandler):
+    def load_plot(self, plotname, callback):
+        contents = None
+        with open(os.path.join(plotdir, plotname), 'rb') as f:
+            contents = f.read()
+        callback(contents)
+
+    @asynchronous
+    @gen.engine
+    def get(self, plotname):
+        imgdata = yield gen.Task(self.load_plot, plotname)
+        self.send_file(imgdata, 'image/png')
+
+
 class IndexPage(RPYRequestHandler):
     def get(self):
         self.render_template('index.html')
-
-
-#class IndexPage(RPYRequestHandler):
-    #def do_plot(self, seqname, segname, segidx, callback):
-        #seq = get_sequence(seqname)
-        #segmentation = seq.load_segmentation(segname)
-        #segment = segmentation.get_segment(segidx)
-
-        ## plot
-        #fig = Figure()
-        #canvas = FigureCanvas(fig)
-        #ax = fig.add_subplot(111)
-        #ax.plot(segment.data)
-        #ax.set_title("%s/%s/%i" % (seqname, segname, segidx))
-        #ax.set_xlabel('Sample index (segment-based)')
-        #ax.set_ylabel('Value')
-        #ax.set_xlim(0, segment.data.shape[0])
-        #callback(fig)
-
-    #@asynchronous
-    #@gen.engine
-    #def get(self, seqname, segname, segidx):
-        #segidx = int(segidx)
-        #fig = yield gen.Task(self.do_plot, seqname, segname, segidx)
-        #self.send_plot(fig)
 
 settings = {
     'static_path': os.path.join(os.path.dirname(__file__), 'static'),
@@ -153,20 +180,9 @@ application = tornado.web.Application([
         URLSpec(r"/rworkspace",
                 ListRWorkspace, name='rworkspace'),
         URLSpec(r"/rsocket",
-                RSocket, name='rsocket')
-
-        #URLSpec(r"/seq/(?P<seqname>\w+)",
-                #SequenceHandler, name='sequence'),
-        #URLSpec(r"/seq/(?P<seqname>\w+)/seg/(?P<segname>\w+)/dataplot",
-                #SequenceDataplotHandler, name='sequence_dataplot'),
-        #URLSpec(r"/seq/(?P<seqname>\w+)/seg/(?P<segname>\w+)",
-                #SequenceSegmentationHandler, name="sequence_segmentation"),
-        #URLSpec(r"/seq/(?P<seqname>\w+)/seg/(?P<segname>\w+)/(?P<segidx>\d+)/dataplot",
-                #SequenceSegmentDataPlotHandler, name='sequence_segment_dataplot'),
-        #URLSpec(r"/seq/(?P<seqname>\w+)/seg/(?P<segname>\w+)/(?P<segidx>\d+)/medimage",
-                #SequenceSegmentMedimageHandler, name='sequence_segment_medimage'),
-        #URLSpec(r"/seq/(?P<seqname>\w+)/seg/(?P<segname>\w+)/segments",
-                #SequenceSegmentsPlotHandler, name='sequence_segments_plots')
+                RSocket, name='rsocket'),
+        URLSpec(r"/rplot/(?P<plotname>[\w\d\._-]+)",
+                RPlot, name="rplot"),
     ],
     **settings)
 
