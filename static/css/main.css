@@ -1,0 +1,44 @@
+.page-header h1 {
+    font-size: 40px;
+}
+
+h1 .small {
+    font-size: 15px;
+}
+
+.ss-list {
+    margin: 0;
+    padding: 0;
+    list-style:none oustide none;
+}
+
+.ss-segment {
+    display: block;
+    list-style-type: none;
+    height: 300px;  /* This MUST match the height in scroll.init */
+    /*overflow: auto;*/
+}
+
+.segment img {
+    max-height: 200px;
+}
+
+
+.sidebar-nav-fixed {
+    position:fixed;
+    top:60px;
+    /*width:21.97%;*/
+}
+
+@media (max-width: 767px) {
+    .sidebar-nav-fixed {
+        width:auto;
+    }
+}
+
+@media (max-width: 979px) {
+    .sidebar-nav-fixed {
+        position:static;
+        width: auto;
+    }
+}

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome to RPY{% endblock %}
+
+{% block content %}
+
+<div class="row">
+    <div class="span4">
+        <form onsubmit="return false;">
+            <p><label>Input</label>
+            <textarea id="rinput" rows="5" cols="80"></textarea></p>
+            <p><button id="rsubmit" class="btn">Eval</button></p>
+        </form>
+
+        <div id="rhistory">
+        </div>
+    </div>
+
+    <div class="span4">
+        <div id="workspace">
+        </div>
+    </div>
+
+</div>
+
+<script type="text/javascript">
+$(document).ready(function() {
+    var ws = new WebSocket("ws://localhost:8888/rsocket");
+    ws.onopen = function() {
+        var msg = {
+            type: 'refreshws',
+        };
+        ws.send(JSON.stringify(msg));
+    };
+    ws.onmessage = function (evt) {
+        var msg = JSON.parse(evt.data);
+        console.log(msg);
+        switch (msg.type) {
+            case 'workspace':
+                refresh_workspace(msg.data);
+                break;
+            case 'evalresult':
+                append_history(msg.data);
+                break;
+        }
+
+    };
+
+    $('#rsubmit').click(function() {
+        var msg = {
+            type: 'submit',
+            data: $('#rinput').val(),
+        };
+        console.log(msg);
+        ws.send(JSON.stringify(msg));
+        $('#rinput').val('')
+    });
+});
+
+function nl2br(str) {
+    return str.replace("\n", "<br />", "g");
+}
+
+function append_history(what) {
+    $('#rhistory').prepend($('<p />').html(nl2br(what)));
+}
+
+function refresh_workspace(wsdict) {
+    div = $('#workspace')
+    div.empty()
+    // Strobjs
+    for (objname in wsdict.strobjs) {
+        obj = wsdict.strobjs[objname];
+        tdiv = $('<div />').append($('<h4 />').text(objname));
+        tdiv.append($('<p />').html(nl2br(obj)));
+        tdiv.appendTo(div);
+    }
+    // Matrices
+    for (matname in wsdict.matrices) {
+        mat = wsdict.matrices[matname];
+        tdiv = $('<div />').append($('<h4 />').text(matname));
+        table = $('<table />').attr('class', 'table');
+        tbody = $('<tbody />');
+
+        for (var i = 0; i < mat.nrow; ++i) {
+            row = $('<tr />');
+            for (var j = 0; j < mat.ncol; ++j) {
+                row.append($('<td />').text('' + mat.cmajordata[j*mat.nrow + i]));
+            }
+            row.appendTo(tbody);
+        }
+
+        tbody.appendTo(table);
+        table.appendTo(tdiv);
+        tdiv.appendTo(div);
+    }
+    console.log(div);
+}
+</script>
+
+{% endblock %}
